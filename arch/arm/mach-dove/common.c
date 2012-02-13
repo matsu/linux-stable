@@ -32,6 +32,7 @@
 #include <plat/common.h>
 #include <plat/addr-map.h>
 #include "common.h"
+#include "clock.h"
 
 static int get_tclk(void);
 
@@ -292,8 +293,13 @@ void __init dove_sdio1_init(void)
 
 void __init dove_init(void)
 {
+	int tclk;
+
+	dove_devclks_init();
+	tclk = get_tclk();
+
 	printk(KERN_INFO "Dove 88AP510 SoC, ");
-	printk(KERN_INFO "TCLK = %dMHz\n", (get_tclk() + 499999) / 1000000);
+	printk(KERN_INFO "TCLK = %dMHz\n", (tclk + 499999) / 1000000);
 
 #ifdef CONFIG_CACHE_TAUROS2
 	tauros2_init();

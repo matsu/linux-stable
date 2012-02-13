@@ -151,6 +151,11 @@
 #define  PMU_ISO_CPU_MASK		(0x1 << 2)
 #define  PMU_ISO_CORE_MASK		(0x1 << 3)
 
+/* I/O pads power control */
+#define IO_PWR_CTRL	(DOVE_PMU_VIRT_BASE + 0x58)
+#define  IO_PWR_CTRL_PCIE_PHY0	(1 << 16)
+#define  IO_PWR_CTRL_PCIE_PHY1	(1 << 17)
+
 static inline int pmu_to_irq(int pin)
 {
 	if (pin < NR_PMU_IRQS)
