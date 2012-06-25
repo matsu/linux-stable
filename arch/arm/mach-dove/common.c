@@ -21,8 +21,10 @@
 #include <linux/spinlock.h>
 #include <linux/gpio.h>
 #include <linux/timex.h>
+#include <linux/export.h>
 #include <asm/page.h>
 #include <asm/setup.h>
+#include <asm/timex.h>
 #include <asm/hardware/cache-tauros2.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
@@ -39,13 +41,12 @@
 #include <plat/common.h>
 #include <plat/addr-map.h>
 #include <plat/audio.h>
+#include <plat/mv_xor.h>
 #include "common.h"
-#include "clock.h"
 
 unsigned int dove_tclk;
 static unsigned int dove_vmeta_memory_start;
 static unsigned int dove_gpu_memory_start;
-
 static int get_tclk(void);
 
 /*****************************************************************************
@@ -78,19 +79,6 @@ static struct map_desc dove_io_desc[] __initdata = {
 void __init dove_map_io(void)
 {
 	iotable_init(dove_io_desc, ARRAY_SIZE(dove_io_desc));
-}
-
-/*****************************************************************************
- * CLK tree
- ****************************************************************************/
-static struct clk *tclk;
-
-static void __init clk_init(void)
-{
-	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, CLK_IS_ROOT,
-				       get_tclk());
-
-	orion_clkdev_init(tclk);
 }
 
 /*****************************************************************************
@@ -143,7 +131,6 @@ static struct platform_device dove_vmeta = {
 	.dev		= {
 		.dma_mask		= &vmeta_dmamask,
 		.coherent_dma_mask	= DMA_BIT_MASK(32),
-// Sebastian removed this one		.platform_data		= NULL,
 	},
 	.resource	= dove_vmeta_resources,
 	.num_resources	= ARRAY_SIZE(dove_vmeta_resources),
@@ -259,6 +246,7 @@ EXPORT_SYMBOL(dove_gpu_get_memory_size);
  * CLK tree
  ****************************************************************************/
 static struct orion_clk_gate dove_clk_gates[] = {
+#if 0
 	ORION_CLK_GATE("usb0", CLOCK_GATING_BIT_USB0),
 	ORION_CLK_GATE("usb1", CLOCK_GATING_BIT_USB1),
 	ORION_CLK_GATE("sdio0", CLOCK_GATING_BIT_SDIO0),
@@ -277,6 +265,7 @@ static struct orion_clk_gate dove_clk_gates[] = {
 	ORION_CLK_PHYGATE("sata", CLOCK_GATING_BIT_SATA, SATA_VIRT_BASE),
 	ORION_CLK_PHYGATE("pex0", CLOCK_GATING_BIT_PCIE0, DOVE_PCIE0_VIRT_BASE),
 	ORION_CLK_PHYGATE("pex1", CLOCK_GATING_BIT_PCIE1, DOVE_PCIE1_VIRT_BASE),
+#endif
 };
 
 static struct orion_clk_clock dove_clk_clocks[] = {
@@ -310,9 +299,18 @@ static struct orion_clk_platform_data dove_clk_data = {
 	.num_clocks = ARRAY_SIZE(dove_clk_clocks),
 };
 
-void __init dove_clk_init(void)
+/*****************************************************************************
+ * CLK tree
+ ****************************************************************************/
+static struct clk *tclk;
+
+static void __init clk_init(void)
 {
-	orion_clk_init(&dove_clk_data, dove_tclk);
+	tclk = clk_register_fixed_rate(NULL, "tclk", NULL, CLK_IS_ROOT,
+				       get_tclk());
+
+	orion_clkdev_init(tclk);
+	orion_clk_init(&dove_clk_data, get_tclk());
 }
 
 /*****************************************************************************
@@ -430,7 +428,7 @@ void __init dove_init_early(void)
 	orion_time_set_base(TIMER_VIRT_BASE);
 }
 
-static unsigned int __init dove_find_tclk(void)
+static int get_tclk(void)
 {
 	/* use DOVE_RESET_SAMPLE_HI/LO to detect tclk */
 	return 166666667;
@@ -438,9 +436,8 @@ static unsigned int __init dove_find_tclk(void)
 
 static void __init dove_timer_init(void)
 {
-	dove_tclk = dove_find_tclk();
 	orion_time_init(BRIDGE_VIRT_BASE, BRIDGE_INT_TIMER1_CLR,
-			IRQ_DOVE_BRIDGE, dove_tclk);
+			IRQ_DOVE_BRIDGE, get_tclk());
 }
 
 struct sys_timer dove_timer = {
@@ -614,22 +611,17 @@ void __init dove_i2s1_init(void)
  ****************************************************************************/
 void __init dove_init(void)
 {
-	int tclk;
-
-	dove_devclks_init();
-	tclk = get_tclk();
-
 	printk(KERN_INFO "Dove 88AP510 SoC, ");
-	printk(KERN_INFO "TCLK = %dMHz\n", (dove_tclk + 499999) / 1000000);
+	printk(KERN_INFO "TCLK = %dMHz\n", (get_tclk() + 499999) / 1000000);
 
 #ifdef CONFIG_CACHE_TAUROS2
 	tauros2_init();
 #endif
 	dove_setup_cpu_mbus();
-	
+#if 0 // TODO - FIX THE FOLLOWING CODE
 	/* Setup root of clk tree */
 	dove_clk_init();
-
+#endif
 	/* Setup root of clk tree */
 	clk_init();
 
