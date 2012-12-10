@@ -39,7 +39,7 @@
 	 SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE | \
 	 SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_BE)
 
-static inline void kirkwood_set_dco(void __iomem *io, unsigned long rate);
+static inline int kirkwood_set_dco(void __iomem *io, unsigned long rate);
 
 static void kirkwood_i2s_dump_spdif(struct kirkwood_dma_data *priv)
 {
@@ -186,13 +186,12 @@ static int kirkwood_i2s_set_fmt(struct snd_soc_dai *cpu_dai,
 	return 0;
 }
 
-static inline void kirkwood_set_dco(void __iomem *io, unsigned long rate)
+static inline int kirkwood_set_dco(void __iomem *io, unsigned long rate)
 {
 	unsigned long value;
 
 	value = KIRKWOOD_DCO_CTL_OFFSET_0;
 	switch (rate) {
-	default:
 	case 44100:
 		value |= KIRKWOOD_DCO_CTL_FREQ_11;
 		break;
@@ -202,6 +201,10 @@ static inline void kirkwood_set_dco(void __iomem *io, unsigned long rate)
 	case 96000:
 		value |= KIRKWOOD_DCO_CTL_FREQ_24;
 		break;
+	default:
+		printk (KERN_ERR "%s Unsupported DCO rate %lu\n",
+			__FUNCTION__, rate);
+		return -EINVAL;
 	}
 	writel(value, io + KIRKWOOD_DCO_CTL);
 
@@ -211,26 +214,31 @@ static inline void kirkwood_set_dco(void __iomem *io, unsigned long rate)
 		value = readl(io + KIRKWOOD_DCO_SPCR_STATUS);
 		value &= KIRKWOOD_DCO_SPCR_STATUS_DCO_LOCK;
 	} while (value == 0);
+	return 0;
 }
 
-static inline void kirkwood_set_rate(struct kirkwood_dma_data* priv, 
+static inline int kirkwood_set_rate(struct kirkwood_dma_data* priv,
 				     unsigned long rate)
 {
-	if (rate == 44100 || rate == 48000 || rate == 96000) {
+	int ret = -EINVAL;
+	/* First check if ext clk is available */
+	if (!IS_ERR(priv->extclk)) {
+		/* use optional external clk for other rates */
+		printk (">>> %s :: extclk set rate = %lu -> %lu\n",
+			__FUNCTION__, rate, 256*rate);
+		ret = clk_set_rate(priv->extclk, 256*rate);
+		if (!ret) writel(KIRKWOOD_MCLK_SOURCE_EXTCLK,
+				priv->io+KIRKWOOD_CLOCKS_CTRL);
+	}
+	if (ret && (rate == 44100 || rate == 48000 || rate == 96000)) {
 		/* use internal dco for supported rates */
 		printk (">>> %s :: dco set rate = %lu\n", 
 			__FUNCTION__, rate);
-		kirkwood_set_dco(priv->io, rate);
-		writel(KIRKWOOD_MCLK_SOURCE_DCO, 
-		       priv->io+KIRKWOOD_CLOCKS_CTRL);
-	} else if (!IS_ERR(priv->extclk)) {
-		/* use optional external clk for other rates */
-		printk (">>> %s :: extclk set rate = %lu -> %lu\n", 
-			__FUNCTION__, rate, 256*rate);
-		clk_set_rate(priv->extclk, 256*rate);
-		writel(KIRKWOOD_MCLK_SOURCE_EXTCLK, 
-		       priv->io+KIRKWOOD_CLOCKS_CTRL);
+		ret = kirkwood_set_dco(priv->io, rate);
+		if (!ret) writel(KIRKWOOD_MCLK_SOURCE_DCO, 
+			priv->io+KIRKWOOD_CLOCKS_CTRL);
 	}
+	return ret;
 }
 
 static int kirkwood_i2s_startup(struct snd_pcm_substream *substream,
@@ -249,6 +257,7 @@ static int kirkwood_i2s_hw_params(struct snd_pcm_substream *substream,
 	struct kirkwood_dma_data *priv = snd_soc_dai_get_drvdata(dai);
 	unsigned int i2s_reg, reg;
 	unsigned long i2s_value, value;
+	int ret;
 	priv->i2s = 1;
 	priv->spdif = 1;
 	priv->iec958 = 0;
@@ -264,7 +273,8 @@ static int kirkwood_i2s_hw_params(struct snd_pcm_substream *substream,
 
 
 	/* set rate */
-	kirkwood_set_rate(priv, params_rate(params));
+	ret = kirkwood_set_rate(priv, params_rate(params));
+	if (ret) return ret;
 
 	i2s_value = readl(priv->io+i2s_reg);
 	i2s_value &= ~KIRKWOOD_I2S_CTL_SIZE_MASK;
